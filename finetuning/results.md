@@ -1,5 +1,3 @@
-Here’s the humanized version from the API:
-
 **Report: Comparative Assessment of Fine-Tuned BERT and Prompt-Engineered Gemini in Spam Classification**
 
 ### 1. Objective
