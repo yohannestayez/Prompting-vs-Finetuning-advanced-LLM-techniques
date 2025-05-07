@@ -1,0 +1,14 @@
+# For the finetuning
+torch
+transformers
+pandas
+scikit-learn
+nltk
+matplotlib
+seaborn
+tqdm
+
+# For the prompting
+streamlit
+google-generativeai
+pyautogen
