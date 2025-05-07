@@ -1,4 +1,7 @@
-from agents import (
+from sys import path
+path.append('.')
+
+from optimizers.agents import (
     Instructor,
     Classifier,
     Optimizer,
@@ -6,7 +9,7 @@ from agents import (
     Insighter,
     Refiner
 )
-from utils import benchmark_code
+from optimizers.utils import benchmark_code
 # Add to top of file
 import logging
 
