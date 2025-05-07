@@ -2,21 +2,35 @@ import autogen
 import json
 import re
 
+
+def _extract_json_from_codeblock(content: str) -> str:
+    # Find start and end of the ```json code block
+    start = content.find("```json")
+    end = content.rfind("```")
+    if start != -1 and end != -1:
+        # Extract and clean the JSON part
+        json_content = content[start + 7:end].strip()
+        return json_content
+    else:
+        # Return original content if no code block found
+        return content
+
 class Instructor(autogen.AssistantAgent):
     """
     Uses Role Prompting + Instruction Prompting
-    System message sets expert role, method provides specific optimization context
     """
     def __init__(self, llm_config):
+        # Define the expert role in system message
         system_message = """You are a senior performance optimization engineer with 15 years of experience. 
         Your specialty is identifying optimization opportunities in Python code."""
         super().__init__(name="Instructor", llm_config=llm_config, system_message=system_message)
 
     def set_optimization_context(self, code: str) -> str:
-        """Instruction Prompting: Directs analysis of specific optimization aspects"""
+        # Create prompt for optimization analysis
         prompt = f"""Analyze this code for optimization potential:
         {code}
         Consider: time complexity, memory usage, and API efficiency"""
+        # Get agent’s reply
         response = self.generate_reply([{"content": prompt, "role": "user"}])
         return response
 
@@ -26,21 +40,47 @@ class Classifier(autogen.AssistantAgent):
     System message contains classification demonstrations
     """
     def __init__(self, llm_config):
-        system_message = """Classify code inefficiencies using these examples:
-        
-        [Example 1]
-        Code: for i in range(n):\n    for j in range(n):\n        process(i,j)
-        Response: {"type": "Algorithm", "category": "Time Complexity", "label": "O(n²)"}
+        system_message = """
+            **Task:**
+            Classify inefficiencies in the following code snippets. For each example, analyze the code and return a JSON object describing the inefficiency using the fields:
 
-        [Example 2] 
-        Code: data = [x for x in range(10^6)]
-        Response: {"type": "Memory", "category": "High Allocation", "label": "Linear Storage"}
+            * `type`: The broad category of inefficiency (e.g., `"Algorithm"`, `"Memory"`, `"I/O"`)
+            * `category`: A more specific sub-type (e.g., `"Time Complexity"`, `"High Allocation"`, `"Network"`)
+            * `label`: A concise description of the inefficiency (e.g., `"O(n²)"`, `"Linear Storage"`, `"Unbatched Requests"`)
 
-        [Example 3]
-        Code: result = requests.get(url)\nresult.json()
-        Response: {"type": "I/O", "category": "Network", "label": "Unbatched Requests"}
-        
-        Return JSON ONLY with type, category, and label fields."""
+            **Constraints:**
+
+            * Output **JSON only** for each example
+            * Format strictly as:
+            `{"type": "...", "category": "...", "label": "..."}`
+            * No explanations or commentary
+
+            **Examples:**
+
+            ```
+            [Example 1]  
+            Code:  
+            for i in range(n):  
+                for j in range(n):  
+                    process(i, j)  
+            Response:  
+            {"type": "Algorithm", "category": "Time Complexity", "label": "O(n²)"}
+
+            [Example 2]  
+            Code:  
+            data = [x for x in range(10^6)]  
+            Response:  
+            {"type": "Memory", "category": "High Allocation", "label": "Linear Storage"}
+
+            [Example 3]  
+            Code:  
+            result = requests.get(url)  
+            result.json()  
+            Response:  
+            {"type": "I/O", "category": "Network", "label": "Unbatched Requests"}
+            ```
+
+            """
         
         super().__init__(name="Classifier", llm_config=llm_config, system_message=system_message)
 
@@ -48,9 +88,13 @@ class Classifier(autogen.AssistantAgent):
         """Structured Output Prompting: Forces JSON format classification"""
         prompt = f"Classify optimization potential for:\n```python\n{code}\n```"
         response = str(self.generate_reply([{"content": prompt, "role": "user"}])['content'])
+        response=_extract_json_from_codeblock(response)
         
         try:
-            return json.loads(response)
+            if isinstance(response, str):
+                return json.loads(response)
+            else:
+                return response
         except json.JSONDecodeError:
             return {"type": "Unknown", "category": "Unclassified", "label": "Needs Review"}
 
@@ -60,21 +104,22 @@ class Optimizer(autogen.AssistantAgent):
     Generates multiple analysis paths then synthesizes them
     """
     def __init__(self, llm_config):
+        # Define system message with 3-step optimization strategy
         system_message = """Break down optimizations in 3 steps: 
         1. Identify bottlenecks 2. Compare approaches 3. Select best method"""
         super().__init__(name="Optimizer", llm_config=llm_config, system_message=system_message)
 
     def generate_optimization_plan(self, code: str) -> str:
         """Self-Consistency Prompting: Two analysis paths + synthesis"""
-        # First analysis path
+        # Analyze algorithmic complexity
         prompt1 = f"""Analyze code:\n{code}\nFocus on algorithmic complexity"""
         analysis1 = self.generate_reply([{"content": prompt1, "role": "user"}])['content']
         
-        # Second analysis path 
-        prompt2 = f"""Analyze same code:\n{code}\nFocus on memory patterns"""
+        # Analyze memory usage patterns
+        prompt2 = f"""Analyze code:\n{code}\nFocus on memory patterns"""
         analysis2 = self.generate_reply([{"content": prompt2, "role": "user"}])['content']
         
-        # Synthesis prompt
+        # Combine both analyses into a unified plan
         final_prompt = f"""Combine these analyses:
         Path 1: {analysis1}
         Path 2: {analysis2}
@@ -87,12 +132,14 @@ class Implementer(autogen.AssistantAgent):
     Structured output prompting with code block enforcement
     """
     def __init__(self, llm_config):
+        # Set system message to enforce code blocks and explanations
         system_message = """Generate optimized Python code with explanations.
         ALWAYS include code in Markdown blocks."""
         super().__init__(name="Implementer", llm_config=llm_config, system_message=system_message)
 
     def implement_optimizations(self, code: str, analysis: str) -> str:
         """Structured Output + Code Generation Prompting"""
+        # Build the prompt with analysis, code, and requested output format
         prompt = f"""Based on this analysis:
         {analysis}
         Optimize this code:
@@ -104,9 +151,12 @@ class Implementer(autogen.AssistantAgent):
         2. Complexity comparison table
         3. Memory usage explanation"""
         
+        # Get the agent’s response
         response = self.generate_reply([{"content": prompt, "role": "user"}])['content']
+        # Extract the Python code block from the response
         match = re.search(r'```python(.*?)```', response, re.DOTALL)
-        return match.group(1).strip() if match else "No valid code generated"
+        result = match.group(1).strip() if match else "No valid code generated"
+        return result
 
 class Insighter(autogen.AssistantAgent):
     """
@@ -120,12 +170,25 @@ class Insighter(autogen.AssistantAgent):
 
     def generate_optimization_insights(self, analysis: str) -> str:
         """Generated Knowledge Prompting: Extract principles from analysis"""
-        prompt = f"""Transform this analysis into general optimization rules:
-        {analysis}
-        Present as:
-        1. Core Principle
-        2. Language-Specific Tip
-        3. Tradeoff Consideration"""
+        prompt = f"""
+                    Transform the following code optimization analysis into a set of **generalized optimization guidelines**.
+
+                    Input:
+                    {analysis}
+
+                    Format the output strictly as:
+                    1. **Core Principle** – Abstract, language-agnostic performance insight.
+                    2. **Language-Specific Tip** – Practical advice for Python developers.
+                    3. **Tradeoff Consideration** – What might be lost or compromised by applying this optimization.
+
+                    Instructions:
+                    - Do **not** include any code from the original input.
+                    - Do **not** output code blocks.
+                    - Focus exclusively on distilled conceptual and practical insights.
+                    - Keep the tone concise, formal, and technical.
+                    - Output only the transformed optimization rules — no additional commentary.
+                    """
+
         return self.generate_reply([{"content": prompt, "role": "user"}])['content']
 
 class Refiner(autogen.AssistantAgent):
@@ -140,19 +203,31 @@ class Refiner(autogen.AssistantAgent):
 
     def refine_implementation(self, code: str, optimized: str, benchmark: dict) -> str:
         """ReAct Prompting: Reason about metrics, act with new implementation"""
-        prompt = f"""Current optimization achieved:
-        - Time: {benchmark['time']}s (Δ{benchmark['time_diff']}%)
-        - Memory: {benchmark['memory']}MB (Δ{benchmark['mem_diff']}%)
-        
-        Refine this code:
+        prompt = f"""        
+        Current optimization achieved:
+            - Time: {benchmark['optimized_time']} (Δ{benchmark['time_improvement']}%)
+            - Memory: {benchmark['optimized_memory']} (Δ{benchmark['memory_change']}%)
+
+        Please refine the following code further based on the performance metrics above.
+
+        Requirements:
+        - Only return an improved Python code block.
+        - The code must be functionally equivalent to the original but optimized for performance.
+        - Avoid unnecessary comments or explanations before the code block.
+        - Maintain readability and Pythonic style.
+
+        Improved version:
         ```python
-        {optimized}
-        ```
-        Original:
+        # Your optimized version here
+        ````
+
+        Original code (for reference):
+
         ```python
         {code}
         ```
-        Suggest better approach considering metrics."""
+
+        """
         
         response = self.generate_reply([{"content": prompt, "role": "user"}])['content']
         match = re.search(r'```python(.*?)```', response, re.DOTALL)
